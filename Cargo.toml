@@ -1,0 +1,31 @@
+[package]
+name = "ridews"
+version = "0.1.0"
+authors = ["whl36512 <whl36512@gmail.com>"]
+
+[dependencies]
+websocket="*"
+
+#hyper = "^0.10.6"
+#unicase = "1.0"
+#url = "1.0"
+#bitflags = "0.9"
+#rand = "0.5"
+#byteorder = "1.0"
+#sha1 = "0.6"
+#base64 = "0.9"
+futures = "0.1"
+#futures = { version = "0.1", optional = true }
+tokio-core = "0.1"
+#tokio-core = { version = "0.1", optional = true }
+#tokio-io = { version = "^0.1.2", optional = true }
+#tokio-tls = { version = "0.2.0", optional = true }
+#bytes = { version = "0.4", optional = true }
+#native-tls = { version = "0.2.1", optional = true }
+log = "*"
+simplelog="*"
+
+
+[dev-dependencies]
+futures-cpupool = "0.1"
+
