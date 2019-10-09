@@ -1,23 +1,23 @@
-extern crate futures;
-extern crate tokio_core;
-extern crate websocket;
+//extern crate futures;
+//extern crate tokio;
+//extern crate websocket;
 
 use std::fmt::Debug;
 
-use self::websocket::async::Server;
-use self::websocket::message::{Message, OwnedMessage};
-use self::websocket::server::InvalidConnection;
+use websocket::r#async::Server;
+use websocket::message::{Message, OwnedMessage};
+use websocket::server::InvalidConnection;
 
-use self::futures::{Future, Sink, Stream};
-use self::tokio_core::reactor::{Core, Handle};
+use futures::{future, Future, Sink, Stream};
+use tokio::runtime::TaskExecutor;
+use super::constants::MSG_GREETING;
 
-use constants::MSG_GREETING;
 
 pub fn websocket_async_server(url: &str) {
-	let mut core = Core::new().unwrap();
-	let handle = core.handle();
+	let mut runtime = tokio::runtime::Builder::new().build().unwrap();
+	let executor = runtime.executor();
 	// bind to the server
-	let server = Server::bind(url, &handle).unwrap();
+	let server = Server::bind(url, &tokio::reactor::Handle::default()).unwrap();
 
 	// time to build the server's future
 	// this will be a struct containing everything the server is going to do
@@ -25,30 +25,41 @@ pub fn websocket_async_server(url: &str) {
 	// a stream of incoming connections
 	let f = server
 		.incoming()
-		// we don't wanna save the stream if it drops
-		.map_err(|InvalidConnection { error, .. }| error)
-		.for_each(|(upgrade, addr)| {
-			info!("Got a connection from: {}", addr);
+		.then(future::ok) // wrap good and bad events into future::ok
+		.filter(|event| {
+			match event {
+				Ok(_) => true, // a good connection
+				Err(InvalidConnection { ref error, .. }) => {
+					println!("Bad client: {}", error);
+					false // we want to save the stream if a client cannot make a valid handshake
+				}
+			}
+		})
+		.and_then(|event| event) // unwrap good connections
+		.map_err(|_| ()) // and silently ignore errors (in `.filter`)
+		.for_each(move |(upgrade, addr)| {
+			println!("Got a connection from: {}", addr);
 			// check if it has the protocol we want
-			//if !upgrade.protocols().iter().any(|s| s == "rust-websocket") {
-				//// reject it if it doesn't
-				//spawn_future(upgrade.reject(), "Upgrade Rejection", &handle);
-				//return Ok(());
-			//}
+			if !upgrade.protocols().iter().any(|s| s == "rust-websocket") {
+				// reject it if it doesn't
+				spawn_future(upgrade.reject(), "Upgrade Rejection", &executor);
+				return Ok(());
+			}
 
 			// accept the request to be a ws connection if it does
 			let f = upgrade
-				//.use_protocol("rust-websocket")
+				.use_protocol("rust-websocket")
 				.accept()
 				// send a greeting!
-				.and_then(|(s, _)| s.send(Message::text(MSG_GREETING).into()))
+                .and_then(|(s, _)| s.send(Message::text(MSG_GREETING).into()))
+				//.and_then(|(s, _)| s.send(Message::text("Hello World!").into()))
 				// simple echo server impl
 				.and_then(|s| {
 					let (sink, stream) = s.split();
 					stream
 						.take_while(|m| Ok(!m.is_close()))
 						.filter_map(|m| {
-							debug!("Message from Client: {:?}", m);
+							println!("Message from Client: {:?}", m);
 							match m {
 								OwnedMessage::Ping(p) => Some(OwnedMessage::Pong(p)),
 								OwnedMessage::Pong(_) => None,
@@ -59,26 +70,23 @@ pub fn websocket_async_server(url: &str) {
 						.and_then(|(_, sink)| sink.send(OwnedMessage::Close(None)))
 				});
 
-			spawn_future(f, "Client Status", &handle);
+			spawn_future(f, "Client Status", &executor);
 			Ok(())
 		});
 
-	core.run(f).unwrap();
+	runtime.block_on(f).unwrap();
 }
 
-fn spawn_future<F, I, E>(f: F, desc: &'static str, handle: &Handle)
+fn spawn_future<F, I, E>(f: F, desc: &'static str, executor: &TaskExecutor)
 where
-	F: Future<Item = I, Error = E> + 'static,
+	F: Future<Item = I, Error = E> + 'static + Send,
 	E: Debug,
 {
-	handle.spawn(
-		f.map_err(move |e| info!("{}: '{:?}'", desc, e))
-			.map(move |_| info!("{}: Finished.", desc)),
+	executor.spawn(
+		f.map_err(move |e| println!("{}: '{:?}'", desc, e))
+			.map(move |_| println!("{}: Finished.", desc)),
 	);
 }
-
-
-
 
 #[cfg(test)]
 mod tests {
